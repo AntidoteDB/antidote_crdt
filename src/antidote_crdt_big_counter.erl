@@ -57,7 +57,7 @@ new() ->
 
 %% @doc The value of this counter is equal to the sum of all the values
 %% having tokens.
--spec value(state()) -> [integer()].
+-spec value(state()) -> integer().
 value(BigCounter) ->
     lists:sum([V || {V, _} <- BigCounter]).
 
