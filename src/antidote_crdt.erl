@@ -40,7 +40,8 @@
                 antidote_crdt_map_rr,
                 antidote_crdt_fat_counter,
                 antidote_crdt_flag_ew,
-                antidote_crdt_flag_dw
+                antidote_crdt_flag_dw,
+                antidote_crdt_tuple
                ]).
 
 -export([is_type/1
