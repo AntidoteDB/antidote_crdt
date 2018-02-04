@@ -48,7 +48,9 @@
           to_binary/1,
           from_binary/1,
           is_operation/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -type state() :: {[{term(), integer()}], integer()}.
@@ -126,11 +128,26 @@ require_state_downstream({set, _}) -> true;
 require_state_downstream({reset, {}}) -> true;
 require_state_downstream(_) -> false.
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
 
+-spec can_compress(effect(), effect()) -> boolean().
+can_compress({increment, _}, {increment, _}) -> true;
+can_compress(_, _) -> false.
+
+-spec compress(effect(), effect()) -> {effect() | noop, effect() | noop}.
+compress({increment, V1}, {increment, V2}) -> {noop, {increment, V1 + V2}}.
 
 %% ===================================================================
 %% EUnit tests
 %% ===================================================================
 -ifdef(TEST).
+
+compression_test() ->
+    ?assertEqual(can_compress({increment, 5}, {increment, -5}), true),
+    ?assertEqual(compress({increment, 5}, {increment, -5}), {noop, {increment, 0}}),
+    ?assertEqual(compress({increment, 10}, {increment, -5}), {noop, {increment, 5}}),
+    ?assertEqual(compress({increment, -5}, {increment, -5}), {noop, {increment, -10}}).
 
 -endif.

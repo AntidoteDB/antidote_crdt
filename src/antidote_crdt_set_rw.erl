@@ -55,7 +55,9 @@
           from_binary/1,
           is_operation/1,
           is_bottom/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 
@@ -78,7 +80,8 @@
     | {reset, {}}.
 
 %% element, CurrentTokens, AddTokens, RemoveTokens
--type downstream_op() :: [{member(), tokens(), tokens(), tokens()}].
+-type element() :: {member(), tokens(), tokens(), tokens()}.
+-type downstream_op() :: [element()].
 
 -type member() :: term().
 -type token() :: term().
@@ -203,6 +206,44 @@ is_bottom(RWSet) ->
   RWSet == new().
 
 require_state_downstream(_) -> true.
+
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(downstream_op(), downstream_op()) -> boolean().
+can_compress(_, _) ->
+    true.
+
+-spec compress(downstream_op(), downstream_op()) -> {downstream_op() | noop, downstream_op() | noop}.
+compress(A, B) ->
+    {noop, compress_helper(A, B)}.
+
+-spec compress_helper(downstream_op(), downstream_op()) -> downstream_op().
+compress_helper([], B) ->
+    B;
+compress_helper(A, []) ->
+    A;
+compress_helper([Op1 = {Elem1, _, _, _} | Rest1] = Ops1, [Op2 = {Elem2, _, _, _} | Rest2] = Ops2) ->
+    if
+        Elem1 == Elem2 ->
+            case merge(Op1, Op2) of
+                {Elem1, [], [], []} -> compress_helper(Rest1, Rest2);
+                NewOp -> [NewOp | compress_helper(Rest1, Rest2)]
+            end;
+        Elem1 > Elem2 ->
+            [Op2 | compress_helper(Ops1, Rest2)];
+        Elem1 < Elem2 ->
+            [Op1 | compress_helper(Rest1, Ops2)]
+    end.
+
+-spec merge(element(), element()) -> element().
+merge({Elem, Current1, ToAdd1, ToRemove1}, {Elem, Current2, ToAdd2, ToRemove2}) ->
+    NewCurrent = ordsets:union(Current1, Current2),
+    Adds = ordsets:union(ToAdd1, ToAdd2),
+    Removes = ordsets:union(ToRemove1, ToRemove2),
+    NewToAdd = ordsets:subtract(ordsets:subtract(Adds, NewCurrent), Removes),
+    {Elem, NewCurrent, NewToAdd, Removes}.
 
 %% ===================================================================
 %% EUnit tests
@@ -396,5 +437,12 @@ prop4_test() ->
   ?assertEqual([a], value(Set2a)),
   ?assertEqual([], Set2b),
   ?assertEqual([], value(Set2b)).
+
+compression_test() ->
+    Token1 = unique(),
+    Token2 = unique(),
+    ?assertEqual(can_compress([{a, [Token1], [Token2], []}], [{a, [Token1, Token2], [], [Token2]}]), true),
+    ?assertEqual(compress([{a, [Token1], [Token2], []}], [{a, lists:sort([Token1, Token2]), [], [Token2]}]), {noop, [{a, lists:sort([Token1, Token2]), [], [Token2]}]}),
+    ?assertEqual(compress([{a, [], [Token2], []}], [{a, [Token2], [], [Token2]}]), {noop, [{a, [Token2], [], [Token2]}]}).
 
 -endif.

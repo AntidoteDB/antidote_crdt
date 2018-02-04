@@ -44,7 +44,9 @@
           from_binary/1,
           is_operation/1,
           is_bottom/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -type uniqueToken() :: term().
@@ -138,7 +140,39 @@ is_operation(_) -> false.
 require_state_downstream(Op) ->
   Op == {reset, {}}.
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
 
+-spec can_compress(effect(), effect()) -> boolean().
+can_compress({_Token1, _Val1}, {_Token2, _Val2}) -> false;
+can_compress(_, _) -> true.
+
+-spec compress(effect(), effect()) -> {effect() | noop, effect() | noop}.
+compress([], []) ->
+    {noop, []};
+compress(A, []) ->
+    {noop, A};
+compress([], B) ->
+    {noop, B};
+compress({Token1, _Val1}=A, Tokens) ->
+    A1 = case ordsets:subtract([Token1], Tokens) of
+      [] ->
+        noop;
+      [Token1] ->
+        A
+    end,
+    {A1, Tokens};
+compress(Tokens, {Token2, _Val2}=B) ->
+    B1 = case ordsets:subtract([Token2], Tokens) of
+      [] ->
+        noop;
+      [Token2] ->
+        B
+    end,
+    {B1, Tokens};
+compress(Tokens1, Tokens2) ->
+    {noop, ordsets:union(Tokens1, Tokens2)}.
 
 %% ===================================================================
 %% EUnit tests
@@ -172,5 +206,14 @@ update_increment_test() ->
     ?assertEqual(4, value(FatCnt3)),
     ?assertEqual(0, value(FatCnt4)),
     ?assertEqual(-2, value(FatCnt5)).
+
+compression_test() ->
+    Token1 = unique(),
+    Token2 = unique(),
+    ?assertEqual(can_compress({Token1, 5}, {Token2, -5}), false),
+    ?assertEqual(can_compress({Token1, 5}, []), true),
+    ?assertEqual(compress({Token2, 10}, lists:sort([Token1, Token2])), {noop, lists:sort([Token1, Token2])}),
+    ?assertEqual(compress(lists:sort([Token1, Token2]), {Token2, 10}), {noop, lists:sort([Token1, Token2])}),
+    ?assertEqual(compress({Token1, 10}, [Token2]), {{Token1, 10}, [Token2]}).
 
 -endif.

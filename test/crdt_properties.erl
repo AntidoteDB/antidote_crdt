@@ -84,6 +84,8 @@ generateOps(OpGen) ->
   list(oneof([
     % pulls one operation from the first replica to the second
     {pull, replica(), replica()},
+    % pulls two operations from the first replica to the second and compresses the operations
+    {pull_compress, replica(), replica()},
     % execute operation on a given replica
     {exec, replica(), OpGen()}
   ])).
@@ -196,6 +198,53 @@ execSystem(Crdt, [{pull, Source, Target}|RemainingOps], State) ->
           clock = TargetClock#{Source => maps:get(Source, Clock)}
         },
         State#{Target => NewTargetState}
+    end,
+
+
+  execSystem(Crdt, RemainingOps, NewState);
+execSystem(Crdt, [{pull_compress, Source, Target}|RemainingOps], State) ->
+  TargetState = maps:get(Target, State),
+  TargetClock = TargetState#test_replica_state.clock,
+  SourceState = maps:get(Source, State),
+  % get all downstream operations at the source, which are not yet delivered to the target,
+  % and which have all dependencies already delivered at the target
+  Effects = [{Clock, Effect} ||
+    {Clock, Effect} <- SourceState#test_replica_state.downstreamOps,
+    not clock_le(Clock, TargetClock),
+    clock_le(Clock#{Source => 0}, TargetClock)
+  ],
+  NewState =
+    case Effects of
+      [{_Clock1, Op1}, {Clock2, Op2}|_] ->
+        case Crdt:can_compress(Op1, Op2) of
+          true ->
+            {COp1, COp2} = Crdt:compress(Op1, Op2),
+            CrdtState1 = TargetState#test_replica_state.state,
+            CrdtState2 =
+            case COp1 of
+              noop ->
+                CrdtState1;
+              _ ->
+                {ok, S2} = Crdt:update(COp1, CrdtState1),
+                S2
+            end,
+            CrdtState3 =
+            case COp2 of
+              noop ->
+                CrdtState1;
+              _ ->
+                {ok, S3} = Crdt:update(COp2, CrdtState2),
+                S3
+            end,
+            NewTargetState = TargetState#test_replica_state{
+              state = CrdtState3,
+              clock = TargetClock#{Source => maps:get(Source, Clock2)}
+            },
+            State#{Target => NewTargetState};
+          false -> State
+        end;
+
+      _ -> State
     end,
 
 

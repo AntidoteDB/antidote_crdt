@@ -40,7 +40,9 @@
           to_binary/1,
           from_binary/1,
           is_operation/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 %% @doc Create a new, empty 'pncounter()'
@@ -114,6 +116,17 @@ require_state_downstream(_) ->
     false.
 
 %% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(pncounter_effect(), pncounter_effect()) -> boolean().
+can_compress(_, _) -> true.
+
+-spec compress(pncounter_effect(), pncounter_effect()) -> {pncounter_effect() | noop, pncounter_effect() | noop}.
+compress(N1, N2) ->
+    {noop, N1+N2}.
+
+%% ===================================================================
 %% EUnit tests
 %% ===================================================================
 -ifdef(TEST).
@@ -172,5 +185,11 @@ binary_test() ->
     BinaryPNCnt1 = to_binary(PNCnt1),
     {ok, PNCnt2} = from_binary(BinaryPNCnt1),
     ?assert(equal(PNCnt1, PNCnt2)).
+
+compression_test() ->
+    ?assertEqual(can_compress(5, -5), true),
+    ?assertEqual(compress(5, -5), {noop, 0}),
+    ?assertEqual(compress(10, -5), {noop, 5}),
+    ?assertEqual(compress(-5, -5), {noop, -10}).
 
 -endif.

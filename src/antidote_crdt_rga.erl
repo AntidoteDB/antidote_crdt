@@ -48,7 +48,9 @@
           to_binary/1,
           from_binary/1,
           is_operation/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -export([purge_tombstones/1]).
@@ -163,6 +165,22 @@ to_binary(Rga1) ->
 
 from_binary(Bin) ->
     {ok, erlang:binary_to_term(Bin)}.
+
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+%% TODO: write compression
+-spec can_compress(rga_downstream_op(), rga_downstream_op()) -> boolean().
+can_compress(_, _) -> false.
+
+%% TODO: write compression
+-spec compress(rga_downstream_op(), rga_downstream_op()) -> {rga_downstream_op() | noop, rga_downstream_op() | noop}.
+compress(_, _) -> {noop, noop}.
+
+%% ===================================================================
+%% EUnit tests
+%% ===================================================================
 
 -ifdef(TEST).
 

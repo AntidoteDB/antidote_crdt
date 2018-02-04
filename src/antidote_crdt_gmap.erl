@@ -31,7 +31,8 @@
 
 %% API
 -export([new/0, value/1, update/2, equal/2,
-  to_binary/1, from_binary/1, is_operation/1, downstream/2, require_state_downstream/1]).
+  to_binary/1, from_binary/1, is_operation/1, downstream/2, require_state_downstream/1,
+  can_compress/2, compress/2]).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -46,7 +47,7 @@
 -type nested_op() :: {{Key::term(), Type::atom() }, Op::term()}.
 -type gmap_effect() ::
     {update, nested_downstream()}
-  | {update, [nested_downstream()]}.
+  | {update, [gmap_effect()]}.
 -type nested_downstream() :: {{Key::term(), Type::atom() }, Op::term()}.
 
 -spec new() -> gmap().
@@ -72,7 +73,7 @@ downstream({update, {{Key, Type}, Op}}, CurrentMap) ->
     {ok, DownstreamOp} = Type:downstream(Op, CurrentValue),
     {ok, {update, {{Key, Type}, DownstreamOp}}};
 downstream({update, Ops}, CurrentMap) when is_list(Ops) ->
-    {ok, {update, lists:map(fun(Op) -> {ok, DSOp} = downstream({update, Op}, CurrentMap), DSOp end, Ops)}};
+    {ok, {update, lists:sort(lists:map(fun(Op) -> {ok, DSOp} = downstream({update, Op}, CurrentMap), DSOp end, Ops))}};
 downstream({reset, {}}, CurrentMap) ->
   % calls reset on all embedded keys which support reset
   Reset =
@@ -85,7 +86,7 @@ downstream({reset, {}}, CurrentMap) ->
       end
     end,
   DownstreamResets = lists:flatmap(Reset, dict:to_list(CurrentMap)),
-  {ok, {update, DownstreamResets}}.
+  {ok, {update, lists:sort(DownstreamResets)}}.
 
 -spec update(gmap_effect(), gmap()) -> {ok, gmap()}.
 update({update, {{Key, Type}, Op}}, Map) ->
@@ -138,6 +139,48 @@ distinct([]) -> true;
 distinct([X|Xs]) ->
   not lists:member(X, Xs) andalso distinct(Xs).
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(gmap_effect(), gmap_effect()) -> boolean().
+can_compress(_, _) -> true.
+
+-spec compress(gmap_effect(), gmap_effect()) -> {gmap_effect() | noop, gmap_effect() | noop}.
+compress({update, {{_Key1, _Type1}, _Update1} = A}, {update, {{_Key2, _Type2}, _Update2} = B}) ->
+    compress({update, [{update, A}]}, {update, [{update, B}]});
+compress({update, {{_Key1, _Type1}, _Update1} = A}, B) ->
+    compress({update, [{update, A}]}, B);
+compress(A, {update, {{_Key2, _Type2}, _Update2} = B}) ->
+    compress(A, {update, [{update, B}]});
+compress({update, A}, {update, B}) ->
+    {noop, {update, compress_helper(A, B)}}.
+
+-spec compress_helper([nested_op()], [nested_op()]) -> [nested_op()].
+compress_helper([], B) ->
+    B;
+compress_helper(A, []) ->
+    A;
+compress_helper([Op1 = {update, {Elem1, IOp1}} | Rest1] = Ops1, [Op2 = {update, {Elem2, IOp2}} | Rest2] = Ops2) ->
+    if
+        Elem1 == Elem2 ->
+            {_, Type} = Elem1,
+            case antidote_crdt:is_compressable(Type) andalso Type:can_compress(IOp1, IOp2) of
+                true ->
+                    case Type:compress(IOp1, IOp2) of
+                        {noop, noop} -> compress_helper(Rest1, Rest2);
+                        {noop, NewOp} -> [{update, {Elem1, NewOp}} | compress_helper(Rest1, Rest2)];
+                        {NewOp, noop} -> [{update, {Elem1, NewOp}} | compress_helper(Rest1, Rest2)];
+                        {NewOp1, NewOp2} -> [{update, {Elem1, NewOp1}}, {update, {Elem1, NewOp2}} | compress_helper(Rest1, Rest2)]
+                    end;
+                false ->
+                    [Op1, Op2 | compress_helper(Rest1, Rest2)]
+            end;
+        Elem1 > Elem2 ->
+            [Op2 | compress_helper(Ops1, Rest2)];
+        Elem1 < Elem2 ->
+            [Op1 | compress_helper(Rest1, Ops2)]
+    end.
 
 %% ===================================================================
 %% EUnit tests
@@ -161,6 +204,19 @@ update2_test() ->
   {ok, Effect2} = downstream({reset, {}}, Map2),
   {ok, Map3} = update(Effect2, Map2),
   ?assertEqual([{{a, antidote_crdt_orset}, []}], value(Map3)).
+
+compression_test() ->
+    Update1 = {update, [{update, {{k1, antidote_crdt_gset}, [1, 2, 3]}}]},
+    Update2 = {update, [{update, {{k1, antidote_crdt_gset}, [4, 5, 6]}}]},
+    Update3 = {update, [{update, {{k2, antidote_crdt_gset}, [4, 5, 6]}}]},
+    Update4 = {update, [{update, {{k5, antidote_crdt_counter}, 5}}]},
+    ?assertEqual(can_compress(Update1, Update2), true),
+    ?assertEqual(compress(Update1, Update2), {noop, {update, [{update, {{k1, antidote_crdt_gset}, [1, 2, 3, 4, 5, 6]}}]}}),
+    {update, [U1]} = Update1,
+    {update, [U3]} = Update3,
+    ?assertEqual(compress(Update1, Update3), {noop, {update, [U1, U3]}}),
+    {update, [U4]} = Update4,
+    ?assertEqual(compress(Update1, Update4), {noop, {update, [U1, U4]}}).
 
 -endif.
 

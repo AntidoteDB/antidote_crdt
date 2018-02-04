@@ -40,7 +40,9 @@
           to_binary/1,
           from_binary/1,
           is_operation/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -export_type([lwwreg/0, lwwreg_op/0]).
@@ -87,11 +89,31 @@ to_binary(CRDT) ->
 from_binary(Bin) ->
   {ok, erlang:binary_to_term(Bin)}.
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(term(), term()) -> boolean().
+can_compress(_, _) -> true.
+
+-spec compress(term(), term()) -> {term() | noop, term() | noop}.
+compress({_Time1, _Val1}=A, {_Time2, _Val2}=B) ->
+    {noop, max(A, B)}.
+
+%% ===================================================================
+%% EUnit tests
+%% ===================================================================
+
 -ifdef(test).
 all_test() ->
     S0 = new(),
     {ok, Downstream} = downstream({assign, a}, S0),
     {ok, S1} = update(Downstream, S0),
     ?assertEqual(a, value(S1)).
+
+compression_test() ->
+    ?assertEqual(can_compress({100, a}, {200, b}), true),
+    ?assertEqual(compress({100, a}, {200, b}), {noop, {200, b}}),
+    ?assertEqual(compress({200, b}, {100, a}), {noop, {200, b}}).
 
 -endif.

@@ -38,7 +38,9 @@
           to_binary/1,
           from_binary/1,
           is_operation/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 
@@ -77,6 +79,20 @@ to_binary(CRDT) ->
 
 from_binary(Bin) ->
     ?RIAK_MODULE:from_binary(Bin).
+
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(term(), term()) -> boolean().
+can_compress(_, _) -> true.
+
+-spec compress(term(), term()) -> {term() | noop, term() | noop}.
+compress({merge, S1}, {merge, S2}) -> {noop, ?RIAK_MODULE:merge(S1, S2)}.
+
+%% ===================================================================
+%% EUnit tests
+%% ===================================================================
 
 -ifdef(TEST).
 all_test() ->

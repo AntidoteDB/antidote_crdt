@@ -56,7 +56,9 @@
           from_binary/1,
           is_operation/1,
           require_state_downstream/1,
-          is_bottom/1
+          is_bottom/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -behaviour(antidote_crdt).
@@ -82,7 +84,8 @@
 %%  - the first component is the elem that was added or removed
 %%  - the second component is the list of supporting tokens to be added
 %%  - the third component is the list of supporting tokens to be removed
--type downstream_op() :: [{member(), tokens(), tokens()}].
+-type element() :: {member(), tokens(), tokens()}.
+-type downstream_op() :: [element()].
 
 -type member() :: term().
 -type token() :: binary().
@@ -225,6 +228,44 @@ require_state_downstream({reset, {}}) -> true.
 is_bottom(State) -> State == new().
 
 %% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(downstream_op(), downstream_op()) -> boolean().
+can_compress(_, _) ->
+    true.
+
+-spec compress(downstream_op(), downstream_op()) -> {downstream_op() | noop, downstream_op() | noop}.
+compress(A, B) ->
+    {noop, compress_helper(A, B)}.
+
+-spec compress_helper(downstream_op(), downstream_op()) -> downstream_op().
+compress_helper([], B) ->
+    B;
+compress_helper(A, []) ->
+    A;
+compress_helper([Op1 = {Elem1, _, _} | Rest1] = Ops1, [Op2 = {Elem2, _, _} | Rest2] = Ops2) ->
+    if
+        Elem1 == Elem2 ->
+            case merge(Op1, Op2) of
+                {Elem1, [], []} -> compress_helper(Rest1, Rest2);
+                NewOp -> [NewOp | compress_helper(Rest1, Rest2)]
+            end;
+        Elem1 > Elem2 ->
+            [Op2 | compress_helper(Ops1, Rest2)];
+        Elem1 < Elem2 ->
+            [Op1 | compress_helper(Rest1, Ops2)]
+    end.
+
+-spec merge(element(), element()) -> element().
+merge({Elem, ToAdd1, ToRemove1}, {Elem, ToAdd2, ToRemove2}) ->
+    Adds = ordsets:union(ToAdd1, ToAdd2),
+    Removes = ordsets:union(ToRemove1, ToRemove2),
+    NewToAdd = ordsets:subtract(Adds, Removes),
+    NewToRemove = ordsets:subtract(Removes, Adds),
+    {Elem, NewToAdd, NewToRemove}.
+
+%% ===================================================================
 %% EUnit tests
 %% ===================================================================
 -ifdef(TEST).
@@ -335,5 +376,15 @@ binary_test() ->
     BinaryORSet3 = to_binary(ORSet3),
     {ok, ORSet4} = from_binary(BinaryORSet3),
     ?assert(equal(ORSet3, ORSet4)).
+
+compression_test() ->
+    Token1 = unique(),
+    Token2 = unique(),
+    ?assertEqual(can_compress([{a, [Token1], []}], [{a, [], [Token1]}]), true),
+    ?assertEqual(compress([{a, [Token1], []}], [{a, [], [Token1]}]), {noop, []}),
+    ?assertEqual(compress([{a, [Token1], []}], []), {noop, [{a, [Token1], []}]}),
+    ?assertEqual(compress([{a, [Token1], []}], [{a, [Token2], []}]), {noop, [{a, lists:sort([Token2, Token1]), []}]}),
+    ?assertEqual(compress([{a, [Token1], []}], [{a, [Token2], [Token1]}]), {noop, [{a, [Token2], []}]}),
+    ?assertEqual(compress([{a, [Token1], []}], [{a, [], [Token2]}]), {noop, [{a, [Token1], [Token2]}]}).
 
 -endif.

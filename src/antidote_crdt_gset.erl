@@ -36,7 +36,9 @@
           to_binary/1,
           from_binary/1,
           is_operation/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -type gset() :: ordsets:ordset(member()).
@@ -76,11 +78,34 @@ to_binary(CRDT) ->
 from_binary(Bin) ->
   {ok, erlang:binary_to_term(Bin)}.
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(gset_effect(), gset_effect()) -> boolean().
+can_compress(_, _) -> true.
+
+-spec compress(gset_effect(), gset_effect()) -> {gset_effect() | noop, gset_effect() | noop}.
+compress([], []) -> {noop, []};
+compress(A, []) -> {noop, A};
+compress([], B) -> {noop, B};
+compress(A, B) -> {noop, ordsets:union(A, B)}.
+
+%% ===================================================================
+%% EUnit tests
+%% ===================================================================
+
 -ifdef(test).
 all_test() ->
     S0 = new(),
     {ok, Downstream} = downstream({add, a}, S0),
     {ok, S1} = update(Downstream, S0),
     ?assertEqual(1, riak_dt_gset:stat(element_count, S1)).
+
+compression_test() ->
+    ?assertEqual(can_compress([1, 2, 3], [4, 5, 6]), true),
+    ?assertEqual(compress([1, 2, 3], [4, 5, 6]), {noop, [1, 2, 3, 4, 5, 6]}),
+    ?assertEqual(compress([1, 2, 3], []), {noop, [1, 2, 3]}),
+    ?assertEqual(compress([], [4, 5, 6]), {noop, [4, 5, 6]}).
 
 -endif.

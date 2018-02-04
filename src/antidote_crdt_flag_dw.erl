@@ -34,7 +34,9 @@
           from_binary/1,
           is_operation/1,
           is_bottom/1,
-          require_state_downstream/1
+          require_state_downstream/1,
+          can_compress/2,
+          compress/2
         ]).
 
 -behaviour(antidote_crdt).
@@ -94,10 +96,31 @@ is_bottom(Flag) ->
 
 require_state_downstream(A) -> antidote_crdt_flag:require_state_downstream(A).
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(downstream_op(), downstream_op()) -> boolean().
+can_compress(_, _) -> true.
+
+-spec compress(downstream_op(), downstream_op()) -> {downstream_op() | noop, downstream_op() | noop}.
+compress({SeenTokens1, NewEnableTokens1, NewDisableTokens1}, {SeenTokens2, NewEnableTokens2, NewDisableTokens2}) ->
+    SeenTokens = SeenTokens1 ++ SeenTokens2,
+    FinalEnableTokens = (NewEnableTokens1 ++ NewEnableTokens2) -- SeenTokens,
+    FinalDisableTokens = (NewDisableTokens1 ++ NewDisableTokens2) -- SeenTokens,
+    {noop, {SeenTokens, FinalEnableTokens, FinalDisableTokens}}.
 
 %% ===================================================================
 %% EUnit tests
 %% ===================================================================
 -ifdef(TEST).
+
+compression_test() ->
+    Token1 = antidote_crdt_flag:unique(),
+    Token2 = antidote_crdt_flag:unique(),
+    ?assertEqual(can_compress({[Token1], [], []}, {[Token2], [], []}), true),
+    ?assertEqual(compress({[Token1], [], []}, {[Token2], [], []}), {noop, {[Token1, Token2], [], []}}),
+    ?assertEqual(compress({[Token1], [], []}, {[], [], [Token1]}), {noop, {[Token1], [], []}}),
+    ?assertEqual(compress({[Token1], [], []}, {[], [Token2], []}), {noop, {[Token1], [Token2], []}}).
 
 -endif.

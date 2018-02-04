@@ -28,7 +28,9 @@
           from_binary/1,
           is_operation/1,
           require_state_downstream/1,
-          generate_downstream_check/4
+          generate_downstream_check/4,
+          can_compress/2,
+          compress/2
         ]).
 
 %% API
@@ -186,6 +188,18 @@ require_state_downstream(_) ->
 
 equal(BCounter1, BCounter2) ->
     BCounter1 == BCounter2.
+
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+%% TODO: write compression
+-spec can_compress(term(), term()) -> boolean().
+can_compress(_, _) -> false.
+
+%% TODO: write compression
+-spec compress(term(), term()) -> {term() | noop, term() | noop}.
+compress(_, _) -> {noop, noop}.
 
 %% ===================================================================
 %% EUnit tests

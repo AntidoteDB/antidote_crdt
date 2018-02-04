@@ -45,7 +45,9 @@
           from_binary/1,
           is_operation/1,
           require_state_downstream/1,
-          is_bottom/1
+          is_bottom/1,
+          can_compress/2,
+          compress/2
         ]).
 
 
@@ -139,6 +141,38 @@ require_state_downstream(_) ->
 
 is_bottom(State) -> State == new().
 
+%% ===================================================================
+%% Compression functions
+%% ===================================================================
+
+-spec can_compress(mvreg_effect(), mvreg_effect()) -> boolean().
+can_compress({reset, _}, _) -> false;
+can_compress(_, {reset, _}) -> false;
+can_compress(_, _) ->
+    true.
+
+-spec compress(mvreg_effect(), mvreg_effect()) -> {mvreg_effect() | noop, mvreg_effect() | noop}.
+compress({_V1, ToAdd1, ToRemove1}=A, {V2, ToAdd2, ToRemove2}=B) ->
+    Removes = ordsets:union(ToRemove1, ToRemove2),
+    A1 = case ordsets:subtract([ToAdd1], Removes) of
+      [] ->
+        noop;
+      [ToAdd1] ->
+        A
+    end,
+    B1 = case ordsets:subtract([ToAdd2], Removes) of
+      [] ->
+        noop;
+      [ToAdd2] ->
+        case A1 of
+          noop -> {V2, ToAdd2, ordsets:subtract(Removes, [ToAdd1])};
+          _ -> B
+        end
+    end,
+    case {A1, B1} of
+        {noop, noop} -> {noop, []};
+        _ -> {A1, B1}
+    end.
 
 %% ===================================================================
 %% EUnit tests
@@ -161,5 +195,13 @@ reset_test() ->
     ?assertEqual([], value(R3)),
     ?assertEqual(true, is_bottom(R3)).
 
+compression_test() ->
+    Token1 = unique(),
+    Token2 = unique(),
+    Token3 = unique(),
+    ?assertEqual(can_compress({{a, Token1, []}}, {{a, Token2, [Token1]}}), true),
+    ?assertEqual(compress({a, Token1, []}, {a, Token2, [Token1]}), {noop, {a, Token2, []}}),
+    ?assertEqual(compress({a, Token2, [Token1]}, {a, Token1, []}), {{a, Token2, [Token1]}, noop}),
+    ?assertEqual(compress({a, Token2, [Token1]}, {a, Token3, [Token2]}), {noop, {a, Token3, [Token1]}}).
 
 -endif.
