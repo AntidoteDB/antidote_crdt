@@ -133,9 +133,10 @@ permissions({P, D}) ->
                         end, 0, D),
     TotalIncrements - TotalDecrements.
 
-%% @doc Return the read value of a given `antidote_crdt_counter_b()', itself.
+%% @doc Return the read value of a given `antidote_crdt_counter_b()':
+%% The difference between all the known increments and all the known decrements
 -spec value(antidote_crdt_counter_b()) -> antidote_crdt_counter_b().
-value(Counter) -> Counter.
+value(Counter) -> permissions(Counter).
 
 %% @doc Generate a downstream operation.
 %% The first parameter is either `{increment, pos_integer()}' or `{decrement, pos_integer()}',
@@ -203,6 +204,10 @@ is_operation(Operation) ->
             is_integer(Number) andalso (Number >= 0);
         {increment, {Number, _Actor}} ->
             is_integer(Number) andalso (Number >= 0);
+		%% antidotec_counter does not support decrement operations,
+		%% signed integers are necessary
+        {increment, Number} ->
+            is_integer(Number);
         {transfer, {Number, _, _Actor}} ->
             is_integer(Number) andalso (Number >= 0);
         _ ->
