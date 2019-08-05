@@ -135,7 +135,7 @@ permissions({P, D}) ->
 
 %% @doc Return the read value of a given `antidote_crdt_counter_b()':
 %% The difference between all the known increments and all the known decrements
--spec value(antidote_crdt_counter_b()) -> antidote_crdt_counter_b().
+-spec value(antidote_crdt_counter_b()) -> non_neg_integer().
 value(Counter) -> permissions(Counter).
 
 %% @doc Generate a downstream operation.
