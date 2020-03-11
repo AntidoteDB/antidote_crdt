@@ -25,14 +25,6 @@
 %% List of the contributors to the development of Antidote: see AUTHORS file.
 %% Description and complete License: see LICENSE file.
 
-%% -------------------------------------------------------------------
-%% -*- coding: utf-8 -*-
-%% --------------------------------------------------------------------------
-%%
-%% antidote_crdt_counter_b: A convergent, replicated, operation-based bounded counter.
-%%
-%% --------------------------------------------------------------------------
-
 %% @doc
 %% An operation based implementation of the bounded counter CRDT.
 %% This counter is able to maintain a non-negative value by
