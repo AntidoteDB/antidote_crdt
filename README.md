@@ -1,5 +1,6 @@
 # Antidote CRDT library
 [![Build Status](https://travis-ci.org/AntidoteDB/antidote_crdt.svg?branch=master)](https://travis-ci.org/AntidoteDB/antidote_crdt)
+[![Coverage Status](https://coveralls.io/repos/github/AntidoteDB/antidote_crdt/badge.svg?branch=master)](https://coveralls.io/github/AntidoteDB/antidote_crdt?branch=master)
 
 Operation based CRDT implementations to use with Antidote.
 
