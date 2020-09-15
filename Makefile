@@ -20,9 +20,6 @@ test: compile
 proper:
 	${REBAR} proper -n 1000
 
-format:
-	${REBAR} format
-
 coverage: compile
 	cp _build/proper+test/cover/eunit.coverdata ${COVERPATH}/proper.coverdata ;\
 	${REBAR} cover --verbose
