@@ -1,7 +1,7 @@
 REBAR = $(shell pwd)/rebar3
 COVERPATH = ./_build/test/cover
 
-.PHONY: compile-no-deps test docs xref dialyzer \
+.PHONY: compile clean lint test proper coverage shell docs xref dialyzer typer \
 
 all: compile
 
@@ -14,7 +14,7 @@ clean:
 lint:
 	${REBAR} as lint lint
 
-test: compile
+test:
 	${REBAR} eunit
 
 proper:
@@ -30,10 +30,10 @@ shell:
 docs:
 	${REBAR} doc
 
-xref: compile
+xref:
 	${REBAR} xref
 
-dialyzer: compile
+dialyzer:
 	${REBAR} dialyzer
 
 typer:
