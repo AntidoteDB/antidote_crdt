@@ -5,11 +5,9 @@ otp_release:
   - 23.0
 install:
   - mkdir -p ~/.config/rebar3/
-  - echo "{plugins, [rebar3_proper]}. {deps, [proper]}." > ~/.config/rebar3/rebar.config
+  - echo "{plugins, [{rebar3_proper, \"0.9.0\"}]}." > ~/.config/rebar3/rebar.config
   - make
-  - ./rebar3 update
 script:
-  - make compile
   - make test
   - make proper
   - make coverage
