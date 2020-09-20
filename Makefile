@@ -3,10 +3,7 @@ COVERPATH = ./_build/test/cover
 
 .PHONY: compile clean lint test proper coverage shell docs xref dialyzer typer \
 
-all: update compile
-
-update:
-	${REBAR} update
+all: compile
 
 compile:
 	${REBAR} compile
