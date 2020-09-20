@@ -3,7 +3,10 @@ COVERPATH = ./_build/test/cover
 
 .PHONY: compile clean lint test proper coverage shell docs xref dialyzer typer \
 
-all: compile
+all: update compile
+
+update:
+	${REBAR} update
 
 compile:
 	${REBAR} compile
@@ -20,7 +23,7 @@ test:
 proper:
 	${REBAR} proper -n 1000
 
-coverage: compile
+coverage:
 	cp _build/proper+test/cover/eunit.coverdata ${COVERPATH}/proper.coverdata ;\
 	${REBAR} cover --verbose
 
