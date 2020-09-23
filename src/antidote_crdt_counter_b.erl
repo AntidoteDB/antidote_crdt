@@ -383,4 +383,27 @@ is_operation_test() ->
     ?assertEqual(false, is_operation(decrement)),
     ?assertEqual(false, is_operation({anything, [1, 2, 3]})).
 
+%% Tests that operations are only valid with a positive integer.
+is_operation_only_pos_integer_test() ->
+    ?assertEqual(true, is_operation({increment, {1, r1}})),
+    ?assertEqual(false, is_operation({increment, {0, r1}})),
+    ?assertEqual(false, is_operation({increment, {-1, r1}})),
+    ?assertEqual(true, is_operation({increment, 1})),
+    ?assertEqual(false, is_operation({increment, 0})),
+    ?assertEqual(false, is_operation({increment, -1})),
+
+    ?assertEqual(true, is_operation({decrement, {1, r1}})),
+    ?assertEqual(false, is_operation({decrement, {0, r1}})),
+    ?assertEqual(false, is_operation({decrement, {-1, r1}})),
+    ?assertEqual(true, is_operation({decrement, 1})),
+    ?assertEqual(false, is_operation({decrement, 0})),
+    ?assertEqual(false, is_operation({decrement, -1})),
+
+    ?assertEqual(true, is_operation({transfer, {1, r2, r1}})),
+    ?assertEqual(false, is_operation({transfer, {0, r2, r1}})),
+    ?assertEqual(false, is_operation({transfer, {-1, r2, r1}})),
+    ?assertEqual(true, is_operation({transfer, {1, r2}})),
+    ?assertEqual(false, is_operation({transfer, {0, r2}})),
+    ?assertEqual(false, is_operation({transfer, {-1, r2}})).
+
 -endif.
