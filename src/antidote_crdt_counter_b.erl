@@ -41,6 +41,9 @@
 -behaviour(antidote_crdt).
 
 -include("antidote_crdt.hrl").
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 %% Call backs
 -export([new/0,
@@ -236,8 +239,6 @@ equal(BCounter1, BCounter2) ->
 %% ===================================================================
 
 -ifdef(TEST).
-
--include_lib("eunit/include/eunit.hrl").
 
 %% Utility to generate and apply downstream operations.
 apply_op(Op, Counter) ->
