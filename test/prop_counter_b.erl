@@ -34,6 +34,7 @@
 %% API
 -export([prop_is_operation/0,
     prop_is_not_operation/0,
+    prop_partial_operations_cannot_create_downstream_operations/0,
     prop_increment_decrement/0,
     prop_multiple_operations_check_with_two_possible_ids/0]).
 
@@ -54,6 +55,13 @@ prop_is_not_operation() ->
     ?FORALL(Operation, invalid_negative_operations(),
         begin
             not antidote_crdt_counter_b:is_operation(Operation)
+        end).
+
+prop_partial_operations_cannot_create_downstream_operations() ->
+    ?FORALL(Operation, valid_partial_operations(),
+        begin
+            true = antidote_crdt_counter_b:is_operation(Operation),
+            {error, no_permissions} == antidote_crdt_counter_b:downstream(Operation, antidote_crdt_counter_b:new())
         end).
 
 %% This test checks that increment and decrement operation work correctly when performed after each other.
@@ -91,7 +99,7 @@ prop_multiple_operations_check_with_two_possible_ids() ->
         fun(Ops) ->
             lists:foldl(
                 fun(CurrentOp, CurrentBCounter) ->
-                    apply_op_and_check(CurrentOp,CurrentBCounter)
+                    apply_op_and_check(CurrentOp, CurrentBCounter)
                 end, antidote_crdt_counter_b:new(), Ops),
             true
         end).
@@ -204,7 +212,15 @@ invalid_negative_operations() ->
             {transfer, oneof([{oneof([neg_integer(), 0]), term()}, {oneof([neg_integer(), 0]), term(), term()}])}
         ]).
 
--spec get_increment_decrement_ops() -> {{increment, {pos_integer(), undefined}}, {decrement, {pos_integer(), undefined}}}.
+valid_partial_operations() ->
+    oneof(
+        [
+            {oneof([increment, decrement]), pos_integer()},
+            {transfer, {pos_integer(), term()}}
+        ]).
+
+-spec get_increment_decrement_ops() ->
+    {{increment, {pos_integer(), undefined}}, {decrement, {pos_integer(), undefined}}}.
 get_increment_decrement_ops() ->
     {{increment, {pos_integer(), undefined}}, {decrement, {pos_integer(), undefined}}}.
 
