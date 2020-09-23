@@ -91,36 +91,7 @@ prop_multiple_operations_check_with_two_possible_ids() ->
         fun(Ops) ->
             lists:foldl(
                 fun(CurrentOp, CurrentBCounter) ->
-                    true = antidote_crdt_counter_b:is_operation(CurrentOp),
-                    DownstreamResult = antidote_crdt_counter_b:downstream(CurrentOp, CurrentBCounter),
-                    case CurrentOp of
-                        {increment, {V, Id}} ->
-                            {ok, Downstream = {{increment, V}, Id}} = DownstreamResult,
-                            {ok, NewBCounter} = antidote_crdt_counter_b:update(Downstream, CurrentBCounter),
-                            permissions_increment_check(Id, V, CurrentBCounter, NewBCounter);
-                        {decrement, {V, Id}} ->
-                            LocalPermissions = antidote_crdt_counter_b:local_permissions(Id, CurrentBCounter),
-                            case LocalPermissions >= V of
-                                true ->
-                                    {ok, Downstream = {{decrement, V}, Id}} = DownstreamResult,
-                                    {ok, NewBCounter} = antidote_crdt_counter_b:update(Downstream, CurrentBCounter),
-                                    permissions_decrement_check(Id, V, CurrentBCounter, NewBCounter);
-                                false ->
-                                    {error, no_permissions} = DownstreamResult,
-                                    CurrentBCounter
-                            end;
-                        {transfer, {V, _ToId, FromId}} ->
-                            LocalPermissions = antidote_crdt_counter_b:local_permissions(FromId, CurrentBCounter),
-                            case LocalPermissions >= V of
-                                true ->
-                                    {ok, Downstream = {{transfer, V, ToId}, FromId}} = DownstreamResult,
-                                    {ok, NewBCounter} = antidote_crdt_counter_b:update(Downstream, CurrentBCounter),
-                                    permissions_transfer_check(ToId, FromId, V, CurrentBCounter, NewBCounter);
-                                false ->
-                                    {error, no_permissions} = DownstreamResult,
-                                    CurrentBCounter
-                            end
-                    end
+                    apply_op_and_check(CurrentOp,CurrentBCounter)
                 end, antidote_crdt_counter_b:new(), Ops),
             true
         end).
@@ -129,6 +100,40 @@ prop_multiple_operations_check_with_two_possible_ids() ->
 %%% Helpers %%%
 %%%%%%%%%%%%%%%
 
+-spec apply_op_and_check(antidote_crdt_counter_b:antidote_crdt_counter_b_full_op(), antidote_crdt_counter_b:antidote_crdt_counter_b()) -> antidote_crdt_counter_b:antidote_crdt_counter_b().
+apply_op_and_check(CurrentOp, CurrentBCounter) ->
+    true = antidote_crdt_counter_b:is_operation(CurrentOp),
+    DownstreamResult = antidote_crdt_counter_b:downstream(CurrentOp, CurrentBCounter),
+    case CurrentOp of
+        {increment, {V, Id}} ->
+            {ok, Downstream = {{increment, V}, Id}} = DownstreamResult,
+            {ok, NewBCounter} = antidote_crdt_counter_b:update(Downstream, CurrentBCounter),
+            permissions_increment_check(Id, V, CurrentBCounter, NewBCounter);
+        {decrement, {V, Id}} ->
+            LocalPermissions = antidote_crdt_counter_b:local_permissions(Id, CurrentBCounter),
+            case LocalPermissions >= V of
+                true ->
+                    {ok, Downstream = {{decrement, V}, Id}} = DownstreamResult,
+                    {ok, NewBCounter} = antidote_crdt_counter_b:update(Downstream, CurrentBCounter),
+                    permissions_decrement_check(Id, V, CurrentBCounter, NewBCounter);
+                false ->
+                    {error, no_permissions} = DownstreamResult,
+                    CurrentBCounter
+            end;
+        {transfer, {V, _ToId, FromId}} ->
+            LocalPermissions = antidote_crdt_counter_b:local_permissions(FromId, CurrentBCounter),
+            case LocalPermissions >= V of
+                true ->
+                    {ok, Downstream = {{transfer, V, ToId}, FromId}} = DownstreamResult,
+                    {ok, NewBCounter} = antidote_crdt_counter_b:update(Downstream, CurrentBCounter),
+                    permissions_transfer_check(ToId, FromId, V, CurrentBCounter, NewBCounter);
+                false ->
+                    {error, no_permissions} = DownstreamResult,
+                    CurrentBCounter
+            end
+    end.
+
+-spec permissions_increment_check(dc1 | dc2, pos_integer(), antidote_crdt_counter_b:antidote_crdt_counter_b(), antidote_crdt_counter_b:antidote_crdt_counter_b()) -> antidote_crdt_counter_b:antidote_crdt_counter_b().
 permissions_increment_check(Id, V, CurrentBCounter, NewBCounter) ->
     OtherId =
         case Id == dc1 of
@@ -146,6 +151,7 @@ permissions_increment_check(Id, V, CurrentBCounter, NewBCounter) ->
     V = NewTotalPermissions - PreviousTotalPermissions,
     NewBCounter.
 
+-spec permissions_decrement_check(dc1 | dc2, pos_integer(), antidote_crdt_counter_b:antidote_crdt_counter_b(), antidote_crdt_counter_b:antidote_crdt_counter_b()) -> antidote_crdt_counter_b:antidote_crdt_counter_b().
 permissions_decrement_check(Id, V, CurrentBCounter, NewBCounter) ->
     OtherId =
         case Id == dc1 of
@@ -163,6 +169,7 @@ permissions_decrement_check(Id, V, CurrentBCounter, NewBCounter) ->
     V = PreviousTotalPermissions - NewTotalPermissions,
     NewBCounter.
 
+-spec permissions_transfer_check(dc1 | dc2, dc1 | dc2, pos_integer(), antidote_crdt_counter_b:antidote_crdt_counter_b(), antidote_crdt_counter_b:antidote_crdt_counter_b()) -> antidote_crdt_counter_b:antidote_crdt_counter_b().
 permissions_transfer_check(Id, Id, V, CurrentBCounter, NewBCounter) ->
     permissions_increment_check(Id, V, CurrentBCounter, NewBCounter);
 permissions_transfer_check(ToId, FromId, V, CurrentBCounter, NewBCounter) ->
@@ -181,6 +188,7 @@ permissions_transfer_check(ToId, FromId, V, CurrentBCounter, NewBCounter) ->
 %%% Generators %%%
 %%%%%%%%%%%%%%%%%%
 
+-spec valid_operations() -> antidote_crdt_counter_b:antidote_crdt_counter_b_op().
 valid_operations() ->
     oneof(
         [
@@ -188,6 +196,7 @@ valid_operations() ->
             {transfer, oneof([{pos_integer(), term()}, {pos_integer(), term(), term()}])}
         ]).
 
+-spec invalid_negative_operations() -> term().
 invalid_negative_operations() ->
     oneof(
         [
@@ -195,9 +204,11 @@ invalid_negative_operations() ->
             {transfer, oneof([{oneof([neg_integer(), 0]), term()}, {oneof([neg_integer(), 0]), term(), term()}])}
         ]).
 
+-spec get_increment_decrement_ops() -> {{increment, {pos_integer(), undefined}}, {decrement, {pos_integer(), undefined}}}.
 get_increment_decrement_ops() ->
     {{increment, {pos_integer(), undefined}}, {decrement, {pos_integer(), undefined}}}.
 
+-spec get_random_ops_with_two_possible_ids() -> [antidote_crdt_counter_b:antidote_crdt_counter_b_full_op()].
 get_random_ops_with_two_possible_ids() ->
     list(oneof(
         [

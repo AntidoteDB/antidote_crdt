@@ -71,7 +71,9 @@
 %% An orddict that contains the decrements that were performed on an id.
 -type decrements() :: orddict:orddict(id(), pos_integer()).
 -type antidote_crdt_counter_b() :: {transfers(), decrements()}.
--type antidote_crdt_counter_b_op() :: {increment, {pos_integer(), id()}} | {increment, pos_integer()} | {decrement, {pos_integer(), id()}} | {decrement, pos_integer()} | {transfer, {pos_integer(), id(), id()}} | {transfer, {pos_integer(), id()}}.
+-type antidote_crdt_counter_b_op() :: antidote_crdt_counter_b_partial_op() | antidote_crdt_counter_b_full_op().
+-type antidote_crdt_counter_b_full_op() :: {increment, {pos_integer(), id()}} | {decrement, {pos_integer(), id()}} | {transfer, {pos_integer(), id(), id()}}.
+-type antidote_crdt_counter_b_partial_op() :: {increment, pos_integer()} | {decrement, pos_integer()} | {transfer, {pos_integer(), id()}}.
 -type antidote_crdt_counter_b_effect() :: {{increment, pos_integer()}, id()} | {{decrement, pos_integer()}, id()} | {{transfer, pos_integer(), id()}, id()}.
 
 %% @doc Return a new, empty `antidote_crdt_counter_b()'.
