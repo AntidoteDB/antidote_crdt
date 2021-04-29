@@ -30,7 +30,16 @@
 %% This counter is able to maintain a non-negative value by
 %% explicitly exchanging permissions to execute decrement operations.
 %% All operations on this CRDT are monotonic and do not keep extra tombstones.
-%% In the code the variable V is used for a positive integer.
+%% IMPORTANT:
+%% The bounded counter is special in the sense that valid operation can fail to generate a downstream effect depending on the state of the bounded counter.
+%% IMPORTANT:
+%% This bounded counter allows partial (incomplete) operations to pass the is_operation check but they will always return {error, no_permissions} if used to create a downstream effect.
+%% REASON:
+%% These partial operations exists to allow local operations for clients where the logic for the bounder counter is handled separately.
+%% Handling the bounded counter logic separately is required in most cases because almost any valid operation can fail to generate a downstream effect.
+
+%% In the code the variable V is used for permissions which a positive integer.
+%% The number of total permissions can be 0 but can never be less than 0.
 %% In the code the variable P is used for transfers() which is a defined type.
 %% In the code the variable D is used for decrements() which is a defined type.
 %% @end
@@ -40,6 +49,9 @@
 -behaviour(antidote_crdt).
 
 -include("antidote_crdt.hrl").
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 %% Call backs
 -export([new/0,
@@ -56,28 +68,39 @@
 
 %% API
 -export([localPermissions/2,
-    permissions/1
+    local_permissions/2,
+    permissions/1,
+    alternative_value/1
 ]).
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
--type id() :: term(). %% A replica's identifier.
--type transfers() :: orddict:orddict({id(), id()}, pos_integer()). %% The orddict that maps
+%% A replica's identifier.
+-type id() :: term().
+%% An `orddict' that contains permission transfers from one `Id' to the other `Id'. The two ids can be equal which is the representation of an increment.
+-type transfers() :: orddict:orddict({id(), id()}, pos_integer()).
+%% An `orddict' that contains the decrements that were performed on an `Id'.
 -type decrements() :: orddict:orddict(id(), pos_integer()).
 -type antidote_crdt_counter_b() :: {transfers(), decrements()}.
--type antidote_crdt_counter_b_op() :: {increment | decrement, {pos_integer(), id()}} | {transfer, {pos_integer(), id(), id()}}.
--type antidote_crdt_counter_b_effect() :: {{increment | decrement, pos_integer()} | {transfer, pos_integer(), id()}, id()}.
+-type antidote_crdt_counter_b_op() :: antidote_crdt_counter_b_partial_op() | antidote_crdt_counter_b_full_op().
+%% Full operations have all the required parameters and can be used directly to create a downstream effect.
+-type antidote_crdt_counter_b_full_op() :: {increment, {pos_integer(), id()}} | {decrement, {pos_integer(), id()}} | {transfer, {pos_integer(), id(), id()}}.
+%% IMPORTANT: Partial operations cannot be used to create downstream effects and will always return `{error, no_permissions}' because no `Id' is specified
+%% They are intended for local operations where the `Id' is known and added later to create a full operation.
+-type antidote_crdt_counter_b_partial_op() :: {increment, pos_integer()} | {decrement, pos_integer()} | {transfer, {pos_integer(), id()}}.
+-type antidote_crdt_counter_b_effect() :: {{increment, pos_integer()}, id()} | {{decrement, pos_integer()}, id()} | {{transfer, pos_integer(), id()}, id()}.
 
 %% @doc Return a new, empty `antidote_crdt_counter_b()'.
 -spec new() -> antidote_crdt_counter_b().
 new() ->
     {orddict:new(), orddict:new()}.
 
-%% @doc Return the available permissions of replica `Id' in a `antidote_crdt_counter_b()'.
+%% Kept for backwards compatibility.
 -spec localPermissions(id(), antidote_crdt_counter_b()) -> non_neg_integer().
 localPermissions(Id, {P, D}) ->
+    local_permissions(Id, {P, D}).
+
+%% @doc Return the available permissions of replica `Id' in a `antidote_crdt_counter_b()'.
+-spec local_permissions(id(), antidote_crdt_counter_b()) -> non_neg_integer().
+local_permissions(Id, {P, D}) ->
     Received = orddict:fold(
         fun
             (_, V, Acc) ->
@@ -125,39 +148,56 @@ permissions({P, D}) ->
         end, 0, D),
     TotalIncrements - TotalDecrements.
 
+%% TODO this is not the most useful result see alternative_value function
 %% @doc Return the read value of a given `antidote_crdt_counter_b()', itself.
 -spec value(antidote_crdt_counter_b()) -> antidote_crdt_counter_b().
 value(Counter) -> Counter.
 
-%% @doc Generate a downstream operation.
-%% The first parameter is either `{increment, pos_integer()}' or `{decrement, pos_integer()}',
-%% which specify the operation and amount, or `{transfer, pos_integer(), id()}'
-%% that additionally specifies the target replica.
-%% The second parameter is an `actor()' who identifies the source replica,
-%% and the third parameter is a `antidote_crdt_counter_b()' which holds the current snapshot.
-%%
-%% Return a tuple containing the operation and source replica.
-%% This operation fails and returns `{error, no_permissions}'
-%% if it tries to consume resources unavailable to the source replica
-%% (which prevents logging of forbidden attempts).
--spec downstream(antidote_crdt_counter_b_op(), antidote_crdt_counter_b()) -> {ok, antidote_crdt_counter_b_effect()} | {error, no_permissions}.
-downstream({increment, {V, Actor}}, _Counter) when is_integer(V), V > 0 ->
-    {ok, {{increment, V}, Actor}};
-downstream({decrement, {V, Actor}}, Counter) when is_integer(V), V > 0 ->
-    generate_downstream_check({decrement, V}, Actor, Counter, V);
-downstream({transfer, {V, ToId, Actor}}, Counter) when is_integer(V), V > 0 ->
-    generate_downstream_check({transfer, V, ToId}, Actor, Counter, V).
+-spec alternative_value(antidote_crdt_counter_b()) -> {non_neg_integer(), #{id() => non_neg_integer()}}.
+alternative_value(Counter = {P, _}) ->
+    IdList =
+        ordsets:to_list(
+            lists:foldl(
+                fun({Id1, Id2}, IdSet) ->
+                    NextIdSet = ordsets:add_element(Id1, IdSet),
+                    ordsets:add_element(Id2, NextIdSet)
+                end, ordsets:new(), orddict:fetch_keys(P))),
+    %% Decrements are ignored because decrements are only allowed if a transfer exists
+    IdToLocalPermissionsMap = maps:from_list(lists:map(fun(Id) -> {Id, local_permissions(Id, Counter)} end, IdList)),
+    {permissions(Counter), IdToLocalPermissionsMap}.
 
-generate_downstream_check(Op, Actor, Counter, V) ->
-    Available = localPermissions(Actor, Counter),
-    if Available >= V -> {ok, {Op, Actor}};
+%% @doc Generate a downstream effect from an `antidote_crdt_counter_b' operation.
+%% If the operation is valid but not allowed then `{error, no_permissions}' is returned.
+%% Using partial operations (see type documentation above) will always return `{error, no_permissions}'
+%% since downstream effect must always contain a source `id()'.
+%% Full operations are only allowed if there are enough locally available permissions (also called resources) exist.
+%% The total permissions of a bounded counter cannot go below 0 so operations that would violate this invariant are not allowed. The same holds true for the local permissions of every `id()' in the bounded counter.
+%% IMPORTANT:
+%% The operation is not checked for correctness here! Using an operation that does not pass the `is_operation' check can return invalid results and if applied can break the permissions of the `antidote_crdt_counter_b'!
+-spec downstream(antidote_crdt_counter_b_op(), antidote_crdt_counter_b()) -> {ok, antidote_crdt_counter_b_effect()} | {error, no_permissions}.
+downstream({increment, {V, Id}}, _Counter) ->
+    {ok, {{increment, V}, Id}};
+downstream({decrement, {V, Id}}, Counter) ->
+    generate_downstream_check({decrement, V}, Id, Counter, V);
+downstream({transfer, {V, ToId, FromId}}, Counter) ->
+    generate_downstream_check({transfer, V, ToId}, FromId, Counter, V);
+%% Special case for partial operations (these should be handled at a higher level)
+downstream({_, _}, _) ->
+    {error, no_permissions}.
+
+-spec generate_downstream_check({decrement, pos_integer()} | {transfer, pos_integer(), id()}, id(), antidote_crdt_counter_b(), pos_integer()) -> {ok, antidote_crdt_counter_b_effect()} | {error, no_permissions}.
+generate_downstream_check(PartialEffect, Id, Counter, V) ->
+    Available = local_permissions(Id, Counter),
+    if Available >= V -> {ok, {PartialEffect, Id}};
         Available < V -> {error, no_permissions}
     end.
 
-%% @doc Update a `antidote_crdt_counter_b()' with a downstream operation,
-%% usually created with `generate_downstream'.
+%% @doc Applies a downstream effect that was generated using the function `downstream'
 %%
 %% Return the resulting `antidote_crdt_counter_b()' after applying the operation.
+%% IMPORTANT:
+%% The downstream effect is not checked for correctness here!
+%% Using a downstream effect that is invalid can break the permissions of the antidote_crdt_counter_b!
 -spec update(antidote_crdt_counter_b_effect(), antidote_crdt_counter_b()) -> {ok, antidote_crdt_counter_b()}.
 update({{increment, V}, Id}, Counter) ->
     increment(Id, V, Counter);
@@ -192,9 +232,14 @@ from_binary(<<B/binary>>) -> {ok, binary_to_term(B)}.
 %% @doc The following operation verifies
 %%      that Operation is supported by this particular CRDT.
 -spec is_operation(term()) -> boolean().
-is_operation({increment, {V, _Actor}}) -> is_pos_integer(V);
-is_operation({decrement, {V, _Actor}}) -> is_pos_integer(V);
-is_operation({transfer, {V, _, _Actor}}) -> is_pos_integer(V);
+is_operation({increment, {V, _Id}}) -> is_pos_integer(V);
+is_operation({decrement, {V, _Id}}) -> is_pos_integer(V);
+is_operation({transfer, {V, _ToId, _FromId}}) -> is_pos_integer(V);
+%% The following three operations are partial operations
+%% and cannot be used to create downstream effects (will always return `{error, no_permissions}')
+is_operation({increment, V}) -> is_pos_integer(V);
+is_operation({decrement, V}) -> is_pos_integer(V);
+is_operation({transfer, {V, _ToId}}) -> is_pos_integer(V);
 is_operation(_) -> false.
 
 -spec is_pos_integer(term()) -> boolean().
@@ -202,7 +247,7 @@ is_pos_integer(V) -> is_integer(V) andalso (V > 0).
 
 %% The antidote_crdt_counter_b requires no state downstream for increment.
 -spec require_state_downstream(antidote_crdt_counter_b_op()) -> boolean().
-require_state_downstream({increment, {_, _}}) ->
+require_state_downstream({increment, _}) ->
     false;
 require_state_downstream(_) ->
     true.
@@ -236,19 +281,20 @@ increment_test() ->
     Counter1 = apply_op({increment, {10, r1}}, Counter0),
     Counter2 = apply_op({increment, {5, r2}}, Counter1),
     %% Test replicas' values.
-    ?assertEqual(5, localPermissions(r2, Counter2)),
-    ?assertEqual(10, localPermissions(r1, Counter2)),
+    ?assertEqual(5, local_permissions(r2, Counter2)),
+    ?assertEqual(10, local_permissions(r1, Counter2)),
     %% Test total value.
     ?assertEqual(15, permissions(Counter2)).
 
-%% Tests the function `localPermissions()'.
-localPermisisons_test() ->
+%% Tests the function `local_permissions()'.
+local_permissions_test() ->
     Counter0 = new(),
     Counter1 = apply_op({increment, {10, r1}}, Counter0),
     %% Test replica with positive amount of permissions.
-    ?assertEqual(10, localPermissions(r1, Counter1)),
+    ?assertEqual(10, local_permissions(r1, Counter1)),
     %% Test nonexistent replica.
-    ?assertEqual(0, localPermissions(r2, Counter1)).
+    ?assertEqual(0, local_permissions(r2, Counter1)),
+    ?assertEqual(10, permissions(Counter1)).
 
 %% Tests decrement operations.
 decrement_test() ->
@@ -258,7 +304,8 @@ decrement_test() ->
     Counter2 = apply_op({decrement, {6, r1}}, Counter1),
     ?assertEqual(4, permissions(Counter2)),
     %% Test nonexistent replica.
-    ?assertEqual(0, localPermissions(r2, Counter1)),
+    ?assertEqual(0, local_permissions(r2, Counter1)),
+    ?assertEqual(0, local_permissions(r2, Counter2)),
     %% Test forbidden decrement.
     OP_DS = downstream({decrement, {6, r1}}, Counter2),
     ?assertEqual({error, no_permissions}, OP_DS).
@@ -284,17 +331,29 @@ transfer_test() ->
     Counter1 = apply_op({increment, {10, r1}}, Counter0),
     %% Test transferring permissions from one replica to another.
     Counter2 = apply_op({transfer, {6, r2, r1}}, Counter1),
-    ?assertEqual(4, localPermissions(r1, Counter2)),
-    ?assertEqual(6, localPermissions(r2, Counter2)),
+    ?assertEqual(4, local_permissions(r1, Counter2)),
+    ?assertEqual(6, local_permissions(r2, Counter2)),
     ?assertEqual(10, permissions(Counter2)),
-    %% Test transference forbidden by lack of previously transfered resources.
+    %% Test transference forbidden by lack of previously transferred resources.
     OP_DS = downstream({transfer, {5, r2, r1}}, Counter2),
     ?assertEqual({error, no_permissions}, OP_DS),
-    %% Test transference enabled by previously transfered resources.
+    %% Test transference enabled by previously transferred resources.
     Counter3 = apply_op({transfer, {5, r1, r2}}, Counter2),
-    ?assertEqual(9, localPermissions(r1, Counter3)),
-    ?assertEqual(1, localPermissions(r2, Counter3)),
+    ?assertEqual(9, local_permissions(r1, Counter3)),
+    ?assertEqual(1, local_permissions(r2, Counter3)),
     ?assertEqual(10, permissions(Counter3)).
+
+operation_without_id_test() ->
+    Counter0 = new(),
+    IncrementOp = {increment, 5},
+    DecrementOp = {decrement, 5},
+    TransferOp = {transfer, {5, dcid}},
+    ?assertEqual(true, is_operation(IncrementOp)),
+    ?assertEqual(true, is_operation(DecrementOp)),
+    ?assertEqual(true, is_operation(TransferOp)),
+    ?assertEqual({error, no_permissions}, downstream(IncrementOp, Counter0)),
+    ?assertEqual({error, no_permissions}, downstream(DecrementOp, Counter0)),
+    ?assertEqual({error, no_permissions}, downstream(TransferOp, Counter0)).
 
 %% Tests the function `value()'.
 value_test() ->
@@ -305,6 +364,16 @@ value_test() ->
     Counter3 = apply_op({transfer, {2, r2, r1}}, Counter2),
     %% Assert `value()' returns `antidote_crdt_counter_b()' itself.
     ?assertEqual(Counter3, value(Counter3)).
+
+%% Tests the function `alternative_value()'.
+alternative_value_test() ->
+    %% Test on `antidote_crdt_counter_b()' resulting from applying all kinds of operation.
+    Counter0 = new(),
+    Counter1 = apply_op({increment, {10, r1}}, Counter0),
+    Counter2 = apply_op({decrement, {6, r1}}, Counter1),
+    Counter3 = apply_op({transfer, {2, r2, r1}}, Counter2),
+    %% Assert `value()' returns `antidote_crdt_counter_b()' itself.
+    ?assertEqual({4, #{r1 => 2, r2 => 2}}, alternative_value(Counter3)).
 
 transfer_to_self_is_is_not_allowed_if_not_enough_local_permissions_exist_test() ->
     Counter0 = new(),
@@ -327,17 +396,49 @@ binary_test() ->
     Counter1 = apply_op({increment, {10, r1}}, Counter0),
     Counter2 = apply_op({decrement, {6, r1}}, Counter1),
     Counter3 = apply_op({transfer, {2, r2, r1}}, Counter2),
-    %% Assert marshaling and unmarshaling holds the same `antidote_crdt_counter_b()'.
+    %% Assert marshalling and unmarshalling holds the same `antidote_crdt_counter_b()'.
     B = to_binary(Counter3),
     ?assertEqual({ok, Counter3}, from_binary(B)).
 
 %% Tests that operations are correctly detected.
 is_operation_test() ->
     ?assertEqual(true, is_operation({transfer, {2, r2, r1}})),
+    ?assertEqual(false, is_operation({transfer, {-2, r2, r1}})),
+    ?assertEqual(false, is_operation({transfer, {0, r2, r1}})),
+    ?assertEqual(true, is_operation({transfer, {2, r2}})),
+    ?assertEqual(false, is_operation({transfer, {-2, r2}})),
+    ?assertEqual(false, is_operation({transfer, 2})),
     ?assertEqual(true, is_operation({increment, {50, r1}})),
+    ?assertEqual(false, is_operation({increment, {-50, r1}})),
+    ?assertEqual(true, is_operation({increment, 50})),
+    ?assertEqual(false, is_operation({increment, -50})),
     ?assertEqual(false, is_operation(increment)),
     ?assertEqual(true, is_operation({decrement, {50, r1}})),
+    ?assertEqual(true, is_operation({decrement, 50})),
     ?assertEqual(false, is_operation(decrement)),
     ?assertEqual(false, is_operation({anything, [1, 2, 3]})).
+
+%% Tests that operations are only valid with a positive integer.
+is_operation_only_pos_integer_test() ->
+    ?assertEqual(true, is_operation({increment, {1, r1}})),
+    ?assertEqual(false, is_operation({increment, {0, r1}})),
+    ?assertEqual(false, is_operation({increment, {-1, r1}})),
+    ?assertEqual(true, is_operation({increment, 1})),
+    ?assertEqual(false, is_operation({increment, 0})),
+    ?assertEqual(false, is_operation({increment, -1})),
+
+    ?assertEqual(true, is_operation({decrement, {1, r1}})),
+    ?assertEqual(false, is_operation({decrement, {0, r1}})),
+    ?assertEqual(false, is_operation({decrement, {-1, r1}})),
+    ?assertEqual(true, is_operation({decrement, 1})),
+    ?assertEqual(false, is_operation({decrement, 0})),
+    ?assertEqual(false, is_operation({decrement, -1})),
+
+    ?assertEqual(true, is_operation({transfer, {1, r2, r1}})),
+    ?assertEqual(false, is_operation({transfer, {0, r2, r1}})),
+    ?assertEqual(false, is_operation({transfer, {-1, r2, r1}})),
+    ?assertEqual(true, is_operation({transfer, {1, r2}})),
+    ?assertEqual(false, is_operation({transfer, {0, r2}})),
+    ?assertEqual(false, is_operation({transfer, {-1, r2}})).
 
 -endif.
