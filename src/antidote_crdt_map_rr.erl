@@ -193,7 +193,7 @@ remove_obsolete({Key, Type}, Val, Map) ->
     end.
 
 is_bottom(Type, State) ->
-    T = antidote_crdt:crdt_alias(Type),
+    T = antidote_crdt:alias(Type),
     erlang:function_exported(T, is_bottom, 1) andalso T:is_bottom(State).
 
 equal(Map1, Map2) ->
